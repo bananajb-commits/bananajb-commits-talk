@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secret Line Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #7494C0; font-family: sans-serif; }
+        .chat-bg { background-color: #7494C0; height: calc(100vh - 120px); overflow-y: auto; }
+        .bubble-me { background-color: #85E249; position: relative; border-radius: 15px; padding: 8px 12px; max-width: 80%; align-self: flex-end; }
+        .bubble-other { background-color: #FFFFFF; position: relative; border-radius: 15px; padding: 8px 12px; max-width: 80%; align-self: flex-start; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="app" class="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col">
+    
+    <!-- 1. ログイン / 登録画面 -->
+    <div id="auth-screen" class="p-8 flex flex-col gap-4">
+        <h1 class="text-2xl font-bold text-center mb-4">チャットを始める</h1>
+        
+        <div id="login-form" class="flex flex-col gap-3">
+            <input id="login-name" type="text" placeholder="ユーザー名" class="border p-2 rounded">
+            <input id="login-pass" type="password" placeholder="パスワード" class="border p-2 rounded">
+            <button onclick="login()" class="bg-blue-500 text-white p-2 rounded">ログイン</button>
+            <button onclick="toggleAuth(true)" class="text-sm text-blue-600">新規登録はこちら</button>
+            <button onclick="showReset()" class="text-sm text-gray-500">パスワードを忘れた</button>
+        </div>
+
+        <div id="register-form" class="hidden flex flex-col gap-3">
+            <input id="reg-name" type="text" placeholder="名前" class="border p-2 rounded">
+            <input id="reg-pass" type="password" placeholder="パスワード" class="border p-2 rounded">
+            <select id="reg-q" class="border p-2 rounded">
+                <option>出身小学校の名前は？</option>
+                <option>ペットの名前は？</option>
+                <option>好きな食べ物は？</option>
+            </select>
+            <input id="reg-a" type="text" placeholder="答え" class="border p-2 rounded">
+            <button onclick="register()" class="bg-green-500 text-white p-2 rounded">登録する</button>
+            <button onclick="toggleAuth(false)" class="text-sm text-blue-600">ログインに戻る</button>
+        </div>
+
+        <div id="reset-form" class="hidden flex flex-col gap-3">
+            <p class="text-sm">秘密の質問に答えてください</p>
+            <input id="reset-name" type="text" placeholder="ユーザー名" class="border p-2 rounded">
+            <div id="reset-q-display" class="font-bold"></div>
+            <input id="reset-a" type="text" placeholder="答え" class="border p-2 rounded">
+            <button onclick="checkResetAnswer()" class="bg-orange-500 text-white p-2 rounded">確認</button>
+            <div id="new-pass-area" class="hidden">
+                <input id="new-pass" type="password" placeholder="新しいパスワード" class="border p-2 rounded w-full">
+                <button onclick="updatePassword()" class="bg-black text-white p-2 rounded w-full mt-2">更新</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. メイン画面 (友達リスト) -->
+    <div id="main-screen" class="hidden flex flex-col h-screen">
+        <header class="bg-slate-800 text-white p-4 flex justify-between items-center">
+            <span id="my-display-name">名前</span>
+            <button onclick="location.reload()" class="text-xs">ログアウト</button>
+        </header>
+        <div class="p-4 bg-gray-100">
+            <p class="text-xs text-gray-500">あなたのフレンドコード:</p>
+            <p id="my-friend-code" class="font-mono font-bold text-lg text-blue-600"></p>
+        </div>
+        <div class="p-4 flex gap-2 border-b">
+            <input id="friend-input" type="text" placeholder="友達のコードを入力" class="border p-2 flex-1 rounded">
+            <button onclick="addFriend()" class="bg-blue-500 text-white px-4 rounded">追加</button>
+        </div>
+        <div id="friend-list" class="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
+            <!-- 友達がここに並ぶ -->
+        </div>
+    </div>
+
+    <!-- 3. チャット画面 -->
+    <div id="chat-screen" class="hidden flex flex-col h-screen">
+        <header class="bg-slate-800 text-white p-4 flex items-center">
+            <button onclick="showMain()" class="mr-4">＜</button>
+            <span id="chat-with-name">友達の名前</span>
+        </header>
+        <div id="chat-log" class="chat-bg p-4 flex flex-col gap-3"></div>
+        <div class="p-4 bg-white flex gap-2 border-t">
+            <input id="msg-input" type="text" placeholder="メッセージを入力" class="border p-2 flex-1 rounded-full">
+            <button onclick="sendMessage()" class="bg-green-500 text-white px-6 rounded-full">送信</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, where, addDoc, onSnapshot, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // --- ここに自分のFirebase設定を貼り付けてください ---
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_PROJECT.appspot.com",
+        messagingSenderId: "YOUR_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+    // ----------------------------------------------
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let currentUser = null;
+    let currentChatFriend = null;
+
+    // 1. ユーザー登録
+    window.register = async () => {
+        const name = document.getElementById('reg-name').value;
+        const pass = document.getElementById('reg-pass').value;
+        const q = document.getElementById('reg-q').value;
+        const a = document.getElementById('reg-a').value;
+        const code = name + "-" + Math.floor(1000 + Math.random() * 9000);
+
+        if(!name || !pass || !a) return alert("全部入力してね");
+
+        await setDoc(doc(db, "users", name), {
+            name, pass, q, a, code, friends: []
+        });
+        alert("登録完了！あなたのコード: " + code);
+        toggleAuth(false);
+    };
+
+    // 2. ログイン
+    window.login = async () => {
+        const name = document.getElementById('login-name').value;
+        const pass = document.getElementById('login-pass').value;
+        const userDoc = await getDoc(doc(db, "users", name));
+
+        if (userDoc.exists() && userDoc.data().pass === pass) {
+            currentUser = userDoc.data();
+            showMain();
+        } else {
+            alert("名前かパスワードが違います");
+        }
+    };
+
+    // 3. 秘密の質問でリセット
+    window.showReset = () => {
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('reset-form').classList.remove('hidden');
+    };
+
+    window.checkResetAnswer = async () => {
+        const name = document.getElementById('reset-name').value;
+        const a = document.getElementById('reset-a').value;
+        const userDoc = await getDoc(doc(db, "users", name));
+        
+        if (userDoc.exists() && userDoc.data().a === a) {
+            document.getElementById('new-pass-area').classList.remove('hidden');
+        } else {
+            alert("答えが違います");
+        }
+    };
+
+    // 4. 友達追加
+    window.addFriend = async () => {
+        const code = document.getElementById('friend-input').value;
+        const q = query(collection(db, "users"), where("code", "==", code));
+        const snap = await getDocs(q);
+
+        if (!snap.empty) {
+            const friendData = snap.docs[0].data();
+            currentUser.friends.push({name: friendData.name, code: friendData.code});
+            await setDoc(doc(db, "users", currentUser.name), { friends: currentUser.friends }, { merge: true });
+            renderFriends();
+            document.getElementById('friend-input').value = "";
+        } else {
+            alert("友達が見つかりません");
+        }
+    };
+
+    // 5. チャット送信
+    window.sendMessage = async () => {
+        const text = document.getElementById('msg-input').value;
+        if(!text) return;
+        const chatId = [currentUser.name, currentChatFriend.name].sort().join("_");
+        await addDoc(collection(db, "chats", chatId, "messages"), {
+            sender: currentUser.name,
+            text: text,
+            time: Date.now()
+        });
+        document.getElementById('msg-input').value = "";
+    };
+
+    // --- 画面切り替え・表示系 ---
+    window.toggleAuth = (isReg) => {
+        document.getElementById('login-form').classList.toggle('hidden', isReg);
+        document.getElementById('register-form').classList.toggle('hidden', !isReg);
+    };
+
+    function showMain() {
+        document.getElementById('auth-screen').classList.add('hidden');
+        document.getElementById('main-screen').classList.remove('hidden');
+        document.getElementById('my-display-name').innerText = currentUser.name;
+        document.getElementById('my-friend-code').innerText = currentUser.code;
+        renderFriends();
+    }
+
+    function renderFriends() {
+        const list = document.getElementById('friend-list');
+        list.innerHTML = "";
+        currentUser.friends.forEach(f => {
+            const div = document.createElement('div');
+            div.className = "p-4 bg-white border rounded shadow-sm cursor-pointer hover:bg-gray-50";
+            div.innerText = f.name;
+            div.onclick = () => startChat(f);
+            list.appendChild(div);
+        });
+    }
+
+    function startChat(friend) {
+        currentChatFriend = friend;
+        document.getElementById('main-screen').classList.add('hidden');
+        document.getElementById('chat-screen').classList.remove('hidden');
+        document.getElementById('chat-with-name').innerText = friend.name;
+        
+        const chatId = [currentUser.name, friend.name].sort().join("_");
+        const q = query(collection(db, "chats", chatId, "messages"), orderBy("time", "asc"));
+        
+        onSnapshot(q, (snap) => {
+            const log = document.getElementById('chat-log');
+            log.innerHTML = "";
+            snap.forEach(doc => {
+                const m = doc.data();
+                const isMe = m.sender === currentUser.name;
+                log.innerHTML += `
+                    <div class="flex ${isMe ? 'justify-end' : 'justify-start'}">
+                        <div class="${isMe ? 'bubble-me' : 'bubble-other'} shadow-sm">${m.text}</div>
+                    </div>
+                `;
+            });
+            log.scrollTop = log.scrollHeight;
+        });
+    }
+
+    window.showMain = () => {
+        document.getElementById('chat-screen').classList.add('hidden');
+        document.getElementById('main-screen').classList.remove('hidden');
+    };
+</script>
+</body>
+</html>
